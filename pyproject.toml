@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adaptive-cxr-enhancement"
+version = "0.1.0"
+description = "Adaptive Degradation-Aware Chest X-Ray Enhancement for Disease Diagnosis"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "torchvision",
+    "numpy",
+    "scipy",
+    "pillow",
+    "opencv-python-headless",
+    "scikit-image",
+    "matplotlib",
+    "pandas",
+    "pyyaml",
+    "tqdm",
+    "timm"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
