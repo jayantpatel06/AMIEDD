@@ -1,37 +1,37 @@
 # Adaptive CXR Enhancement: Benchmark Evaluation Report
 
-**Evaluated on 48 test chest radiograph samples.**
+**Evaluated on 96 test chest radiograph samples.**
 
 ## 1. Image Restoration Quality Comparison
 
 | Cohort | PSNR (dB) | SSIM | MAE |
 | :--- | :---: | :---: | :---: |
-| **Degraded (Raw)** | 30.62 | 0.509 | 0.0682 |
-| **Generic Filter (CLAHE + Bilateral)** | 15.50 | 0.416 | 0.1475 |
-| **Proposed (Model 1 + Model 2 FiLM)** | **29.34** | **0.718** | **0.0280** |
+| **Degraded (Raw)** | 23.08 | 0.432 | 0.0771 |
+| **Generic Filter (CLAHE + Bilateral)** | 14.87 | 0.357 | 0.1573 |
+| **Proposed (Model 1 + Model 2 FiLM)** | **28.33** | **0.709** | **0.0298** |
 
 ## 2. Clinical Diagnostic Efficacy (Model 3 Backbones)
 
 ### Backbone: `densenet121`
 | Cohort | Accuracy | AUC-ROC | F1-Score | Sensitivity | Specificity |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Clean** | 93.8% | 1.000 | 0.941 | 100.0% | 87.5% |
-| **Degraded** | 64.6% | 0.431 | 0.514 | 37.5% | 91.7% |
-| **Generic** | 39.6% | 0.306 | 0.216 | 16.7% | 62.5% |
-| **Adaptive** | 60.4% | 0.818 | 0.698 | 91.7% | 29.2% |
+| **Clean** | 50.0% | 0.637 | 0.667 | 100.0% | 0.0% |
+| **Degraded** | 50.0% | 0.507 | 0.667 | 100.0% | 0.0% |
+| **Generic** | 50.0% | 0.562 | 0.667 | 100.0% | 0.0% |
+| **Adaptive** | 50.0% | 0.361 | 0.667 | 100.0% | 0.0% |
 
 ### Backbone: `resnet50`
 | Cohort | Accuracy | AUC-ROC | F1-Score | Sensitivity | Specificity |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Clean** | 50.0% | 0.658 | 0.667 | 100.0% | 0.0% |
-| **Degraded** | 35.4% | 0.323 | 0.415 | 45.8% | 25.0% |
-| **Generic** | 35.4% | 0.297 | 0.114 | 8.3% | 62.5% |
-| **Adaptive** | 37.5% | 0.352 | 0.516 | 66.7% | 8.3% |
+| **Clean** | 50.0% | 0.894 | 0.667 | 100.0% | 0.0% |
+| **Degraded** | 50.0% | 0.493 | 0.667 | 100.0% | 0.0% |
+| **Generic** | 50.0% | 0.510 | 0.667 | 100.0% | 0.0% |
+| **Adaptive** | 49.0% | 0.424 | 0.657 | 97.9% | 0.0% |
 
 ### Backbone: `efficientnet_b0`
 | Cohort | Accuracy | AUC-ROC | F1-Score | Sensitivity | Specificity |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Clean** | 50.0% | 0.440 | 0.000 | 0.0% | 100.0% |
-| **Degraded** | 70.8% | 0.672 | 0.650 | 54.2% | 87.5% |
-| **Generic** | 66.7% | 0.656 | 0.636 | 58.3% | 75.0% |
-| **Adaptive** | 50.0% | 0.194 | 0.000 | 0.0% | 100.0% |
+| **Clean** | 50.0% | 0.479 | 0.667 | 100.0% | 0.0% |
+| **Degraded** | 51.0% | 0.511 | 0.671 | 100.0% | 2.1% |
+| **Generic** | 52.1% | 0.521 | 0.667 | 95.8% | 8.3% |
+| **Adaptive** | 46.9% | 0.366 | 0.605 | 81.2% | 12.5% |

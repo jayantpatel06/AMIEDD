@@ -55,8 +55,8 @@ enhancer:  # Model 2
   epochs: 25
   loss_weights:
     l1: 1.0
-    ssim: 0.2
-    edge: 0.1
+    ssim: 0.5
+    edge: 0.25
   checkpoint_dir: "checkpoints/enhancer"
 
 disease_models:  # Model 3

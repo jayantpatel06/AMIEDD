@@ -9,7 +9,7 @@ class FiLMGenerator(nn.Module):
     from a degradation condition vector.
     """
 
-    def __init__(self, cond_dim: int, num_features: int, hidden_dim: int = 64):
+    def __init__(self, cond_dim: int, num_features: int, hidden_dim: int = 128):
         super().__init__()
         self.num_features = num_features
         self.mlp = nn.Sequential(
@@ -40,12 +40,12 @@ class FiLMBlock(nn.Module):
     Output = (1 + gamma) * Norm(Conv(x)) + beta
     """
 
-    def __init__(self, in_channels: int, out_channels: int, cond_dim: int):
+    def __init__(self, in_channels: int, out_channels: int, cond_dim: int, hidden_dim: int = 128):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False)
         self.norm = nn.BatchNorm2d(out_channels)
         self.act = nn.LeakyReLU(0.2, inplace=True)
-        self.film_gen = FiLMGenerator(cond_dim=cond_dim, num_features=out_channels)
+        self.film_gen = FiLMGenerator(cond_dim=cond_dim, num_features=out_channels, hidden_dim=hidden_dim)
 
     def forward(self, x: torch.Tensor, condition: torch.Tensor) -> torch.Tensor:
         h = self.conv(x)

@@ -6,7 +6,7 @@ from torchvision.models import (
     resnet50, ResNet50_Weights,
     efficientnet_b0, EfficientNet_B0_Weights,
 )
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
 class DiseaseClassifier(nn.Module):
@@ -87,13 +87,17 @@ class DiseaseClassifier(nn.Module):
         device: torch.device,
         epochs: int = 4,
         learning_rate: float = 1e-3,
+        class_weights: Optional[torch.Tensor] = None,
+        fine_tune_backbone: bool = False,
+        fine_tune_lr: float = 5e-5,
     ) -> None:
         """
-        Fast calibration of the linear classification head on clean CXR images.
-        Simulates pre-trained clinical AI radiologist performance on pristine scans.
+        Calibrate and optionally fine-tune classification head on clean CXR images.
+        Supports class weighting for handling imbalanced pneumonia vs normal cohorts.
         """
         self.to(device)
-        # Freeze backbone feature layers to preserve ImageNet representations
+
+        # Stage 1: Freeze backbone and train classification head
         for name, param in self.model.named_parameters():
             if "classifier" in name or "fc" in name:
                 param.requires_grad = True
@@ -102,7 +106,11 @@ class DiseaseClassifier(nn.Module):
 
         head_params = [p for p in self.parameters() if p.requires_grad]
         optimizer = torch.optim.AdamW(head_params, lr=learning_rate, weight_decay=1e-3)
-        criterion = nn.CrossEntropyLoss()
+
+        if class_weights is not None:
+            criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
+        else:
+            criterion = nn.CrossEntropyLoss()
 
         self.train()
         for epoch in range(epochs):
@@ -116,7 +124,22 @@ class DiseaseClassifier(nn.Module):
                 loss.backward()
                 optimizer.step()
 
-        # Unfreeze all parameters
+        # Stage 2: Optional end-to-end fine-tuning at lower learning rate
+        if fine_tune_backbone:
+            for param in self.parameters():
+                param.requires_grad = True
+            ft_optimizer = torch.optim.AdamW(self.parameters(), lr=fine_tune_lr, weight_decay=1e-4)
+            for epoch in range(max(epochs // 2, 2)):
+                for _, clean, _, labels in clean_loader:
+                    clean = clean.to(device)
+                    labels = labels.to(device)
+                    ft_optimizer.zero_grad()
+                    logits = self.forward(clean)
+                    loss = criterion(logits, labels)
+                    loss.backward()
+                    ft_optimizer.step()
+
+        # Finalize
         for param in self.parameters():
             param.requires_grad = True
         self.eval()

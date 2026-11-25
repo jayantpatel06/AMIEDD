@@ -62,9 +62,10 @@ def main():
     val_ds = CXRDataset(dataset_dir, split="val", image_size=image_size, deterministic=True)
     test_ds = CXRDataset(dataset_dir, split="test", image_size=image_size, deterministic=True)
 
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=2, drop_last=True)
-    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=2)
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=2)
+    num_workers = 0 if sys.platform.startswith("win") else 2
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, drop_last=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
     print(f"[Pipeline] Loaded datasets: Train={len(train_ds)}, Val={len(val_ds)}, Test={len(test_ds)}")
 
@@ -141,6 +142,16 @@ def main():
         disease_ckpt_dir = Path(cfg["disease_models"]["checkpoint_dir"])
         disease_ckpt_dir.mkdir(parents=True, exist_ok=True)
 
+        # Compute balanced class weights for optimal specificity and accuracy
+        n_samples = len(train_ds.samples)
+        n_norm = sum(1 for _, l in train_ds.samples if l == 0)
+        n_pneu = sum(1 for _, l in train_ds.samples if l == 1)
+        if n_norm > 0 and n_pneu > 0:
+            class_weights = torch.tensor([n_samples / (2.0 * n_norm), n_samples / (2.0 * n_pneu)], dtype=torch.float32)
+            print(f"[Pipeline] Computed balanced class weights: Normal={class_weights[0]:.2f}, Pneumonia={class_weights[1]:.2f}")
+        else:
+            class_weights = None
+
         for arch in cfg["disease_models"]["architectures"]:
             ckpt_path = disease_ckpt_dir / f"{arch}.pth"
             if ckpt_path.exists():
@@ -150,7 +161,7 @@ def main():
             else:
                 print(f"[Pipeline] Calibrating {arch} linear head on clean baseline images (4 epochs)...")
                 model = DiseaseClassifier(architecture=arch, num_classes=2, pretrained=True)
-                model.fit_classifier_head(train_loader, device=device, epochs=4, learning_rate=1e-3)
+                model.fit_classifier_head(train_loader, device=device, epochs=4, learning_rate=1e-3, class_weights=class_weights)
                 torch.save(model.state_dict(), ckpt_path)
 
             disease_models[arch] = model

@@ -26,14 +26,14 @@ class ConvBlock(nn.Module):
 class DecoderBlock(nn.Module):
     """Decoder block with upsampling, skip-connection concatenation, and FiLM modulation."""
 
-    def __init__(self, in_channels: int, skip_channels: int, out_channels: int, cond_dim: int):
+    def __init__(self, in_channels: int, skip_channels: int, out_channels: int, cond_dim: int, film_hidden_dim: int = 128):
         super().__init__()
         self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
         total_in = (in_channels // 2) + skip_channels
         self.conv1 = nn.Conv2d(total_in, out_channels, kernel_size=3, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.relu = nn.LeakyReLU(0.2, inplace=True)
-        self.film = FiLMBlock(out_channels, out_channels, cond_dim=cond_dim)
+        self.film = FiLMBlock(out_channels, out_channels, cond_dim=cond_dim, hidden_dim=film_hidden_dim)
 
     def forward(self, x: torch.Tensor, skip: torch.Tensor, condition: torch.Tensor) -> torch.Tensor:
         x = self.up(x)
@@ -63,6 +63,7 @@ class AdaptiveUNet(nn.Module):
         base_channels: int = 32,
         cond_dim: int = 4,
         residual: bool = True,
+        film_hidden_dim: int = 128,
     ):
         super().__init__()
         self.residual = residual
@@ -91,10 +92,10 @@ class AdaptiveUNet(nn.Module):
         self.bottleneck = ConvBlock(c4, c_bottleneck)
 
         # Decoder with FiLM
-        self.dec4 = DecoderBlock(c_bottleneck, c4, c4, cond_dim=cond_dim)
-        self.dec3 = DecoderBlock(c4, c3, c3, cond_dim=cond_dim)
-        self.dec2 = DecoderBlock(c3, c2, c2, cond_dim=cond_dim)
-        self.dec1 = DecoderBlock(c2, c1, c1, cond_dim=cond_dim)
+        self.dec4 = DecoderBlock(c_bottleneck, c4, c4, cond_dim=cond_dim, film_hidden_dim=film_hidden_dim)
+        self.dec3 = DecoderBlock(c4, c3, c3, cond_dim=cond_dim, film_hidden_dim=film_hidden_dim)
+        self.dec2 = DecoderBlock(c3, c2, c2, cond_dim=cond_dim, film_hidden_dim=film_hidden_dim)
+        self.dec1 = DecoderBlock(c2, c1, c1, cond_dim=cond_dim, film_hidden_dim=film_hidden_dim)
 
         # Output projection
         self.final_conv = nn.Conv2d(c1, out_channels, kernel_size=1)

@@ -29,7 +29,8 @@ def main():
     dataset_dir = Path(cfg["data"]["dataset_dir"])
     image_size = tuple(cfg["data"]["image_size"])
     test_ds = CXRDataset(dataset_dir, split="test", image_size=image_size, deterministic=True)
-    test_loader = DataLoader(test_ds, batch_size=8, shuffle=False, num_workers=2)
+    num_workers = 0 if sys.platform.startswith("win") else 2
+    test_loader = DataLoader(test_ds, batch_size=8, shuffle=False, num_workers=num_workers)
     print(f"[Step 3] Loaded {len(test_ds)} test images from {dataset_dir / 'test'}")
 
     # Load Model 1 (Problem Detective)
