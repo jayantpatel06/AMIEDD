@@ -11,7 +11,7 @@ data:
   image_size: [224, 224]
   num_channels: 1  # Grayscale Chest X-Ray (1 channel) or 3 for transfer learning
   batch_size: 16
-  num_workers: 4
+  num_workers: 0  # Windows: must be 0 (spawn multiprocessing incompatible with DataLoader workers > 0)
   val_split: 0.15
   test_split: 0.15
 

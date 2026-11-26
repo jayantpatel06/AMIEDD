@@ -20,9 +20,16 @@ dependencies = [
     "pandas",
     "pyyaml",
     "tqdm",
-    "timm"
+    "timm",
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart"
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"

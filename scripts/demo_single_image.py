@@ -68,12 +68,16 @@ def main():
         enhancer.load_state_dict(ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt)
     enhancer.eval()
 
-    # Load Model 3 (Disease Classifier)
-    d_ckpt = Path(cfg["disease_models"]["checkpoint_dir"]) / "densenet121.pth"
-    d_model = DiseaseClassifier(architecture="densenet121", num_classes=2, pretrained=not d_ckpt.exists())
-    if d_ckpt.exists():
-        d_model.load_state_dict(torch.load(d_ckpt, map_location=device))
-    d_model.eval()
+    # Load Model 3 (Multi-Radiologist Panel: DenseNet121, EfficientNet-B0, ResNet50)
+    disease_models = {}
+    disease_ckpt_dir = Path(cfg["disease_models"]["checkpoint_dir"])
+    for arch in ["densenet121", "efficientnet_b0", "resnet50"]:
+        d_ckpt = disease_ckpt_dir / f"{arch}.pth"
+        d_model = DiseaseClassifier(architecture=arch, num_classes=2, pretrained=not d_ckpt.exists())
+        if d_ckpt.exists():
+            d_model.load_state_dict(torch.load(d_ckpt, map_location=device))
+        d_model.eval()
+        disease_models[arch] = d_model
 
     # Inference
     deg_t = torch.from_numpy(degraded).unsqueeze(0).unsqueeze(0).float()
@@ -88,22 +92,17 @@ def main():
         restored_t = enhancer(deg_t, pred_vector_t)
         restored = restored_t[0, 0].numpy()
 
-        # Step 3: Disease probability
-        p_clean = d_model.predict_proba(clean_t)[0, 1].item()
-        p_deg = d_model.predict_proba(deg_t)[0, 1].item()
-        p_enh = d_model.predict_proba(restored_t)[0, 1].item()
+        # Step 3: Disease probability across panel
+        probs_dict = {}
+        for arch, m in disease_models.items():
+            p_clean = m.predict_proba(clean_t)[0, 1].item()
+            p_deg = m.predict_proba(deg_t)[0, 1].item()
+            p_enh = m.predict_proba(restored_t)[0, 1].item()
+            probs_dict[arch] = {"Clean": p_clean, "Degraded": p_deg, "Adaptive": p_enh}
 
     # Compute PSNR
     m_deg = compute_image_metrics(degraded, clean)
     m_enh = compute_image_metrics(restored, clean)
-
-    probs_dict = {
-        "DenseNet121": {
-            "Clean": p_clean,
-            "Degraded": p_deg,
-            "Adaptive": p_enh,
-        }
-    }
 
     plot_sample_comparison(
         clean_np=clean,
