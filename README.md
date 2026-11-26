@@ -21,7 +21,7 @@
 
 ---
 
-## 1. Why AMIEDD?
+## 1. Why AMIEDD??
 
 Real-world chest X-rays (CXRs) frequently suffer from low-dose sensor quantum noise, respiratory motion blur, underexposure/dynamic-range loss, and lossy PACS JPEG compression. Standard enhancement techniques (like CLAHE or unsharp masking) are **blind to the corruption type**: they amplify sensor noise into pseudo-opacities, distort radiographic density (`PSNR` drops to `17.51 dB`), and leave downstream classifiers with a **59–66% false-alarm rate** on healthy lungs.
 
