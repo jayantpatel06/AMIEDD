@@ -51,7 +51,7 @@ export const ArchitecturePage: React.FC = () => {
           <div className="p-4 rounded-2xl bg-[#E6ECE5] border border-[#C9D7C8] text-center space-y-1.5 shadow-sm">
             <span className="text-[10px] uppercase font-bold text-[#38563E]">Model 2</span>
             <p className="text-xs font-bold text-[#1F2421]">FiLM Adaptive U-Net</p>
-            <p className="text-[11px] text-[#38563E]">Clean Anatomical Tensor +10.6 dB PSNR</p>
+            <p className="text-[11px] text-[#38563E]">Restored Tensor (+7.5 dB PSNR, 0.875 SSIM)</p>
           </div>
         </div>
 
@@ -130,17 +130,17 @@ export const ArchitecturePage: React.FC = () => {
 
           <div className="p-4 rounded-2xl bg-[#FAF8F5] border border-[#EBE5D8] font-mono text-center text-xs text-[#1F2421] leading-relaxed">
             <p className="font-bold text-sm text-[#944432] mb-1">
-              L_total = L&#8321; + &lambda;_SSIM &middot; (1 &minus; SSIM) + &lambda;_perc &middot; L_VGG
+              L_total = L&#8321; + 0.2 &middot; (1 &minus; SSIM) + 0.1 &middot; L_Sobel
             </p>
             <p className="text-[11px] text-[#5F6862] font-sans mt-2">
-              &bull; L&#8321;: Preserves exact Hounsfield/grayscale radiographic density.<br/>
+              &bull; L&#8321;: Preserves exact grayscale radiographic density.<br/>
               &bull; SSIM: Protects lung boundaries and rib contours.<br/>
-              &bull; L_VGG: Reconstructs bronchial texture patterns.
+              &bull; L_Sobel: Preserves sharp vascular and pleural edges.
             </p>
           </div>
 
           <p className="text-xs text-[#5F6862] leading-relaxed">
-            Trained on 5,856 authentic Kaggle chest X-rays using continuous augmentation mixtures spanning noise, motion blur, gamma shifts, and JPEG DCT compression.
+            Trained on 5,216 unique Kaggle chest X-ray training scans (624 test scans) using continuous degradation mixtures spanning noise, blur, contrast loss, and JPEG DCT compression.
           </p>
         </div>
       </section>
@@ -157,7 +157,7 @@ export const ArchitecturePage: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center">
           <div className="space-y-3 text-xs text-[#5F6862] leading-relaxed">
             <p>
-              Under physical degradation, isolated models (e.g., DenseNet alone) suffer from high false alarm rates (~28%) because high-frequency noise resembles alveolar consolidations.
+              Under physical degradation, single uncalibrated classifiers suffer severe specificity collapse (only 33–41% normal specificity on degraded scans) because high-frequency noise mimics alveolar consolidations.
             </p>
             <p>
               AMIEDD fuses predictions across three structurally diverse deep neural network architectures using optimized Bayesian weights:
@@ -210,7 +210,7 @@ export const ArchitecturePage: React.FC = () => {
             2. Quantitative Benchmark Matrix
           </h2>
           <p className="text-xs text-[#5F6862]">
-            Empirical evaluation measured across 100 corrupted test radiographs from the authentic Kaggle dataset.
+            Empirical evaluation measured across all 624 unique Kaggle test chest radiographs (234 Normal, 390 Pneumonia).
           </p>
         </div>
 
@@ -219,48 +219,56 @@ export const ArchitecturePage: React.FC = () => {
             <thead>
               <tr className="border-b border-[#EBE5D8] text-[#5F6862] uppercase tracking-wider text-[10px]">
                 <th className="py-3 px-4">Method / Architecture</th>
-                <th className="py-3 px-4">PSNR Gain</th>
+                <th className="py-3 px-4">PSNR Gain (Restored)</th>
+                <th className="py-3 px-4">AUC-ROC</th>
                 <th className="py-3 px-4">Pneumonia Sensitivity</th>
                 <th className="py-3 px-4">Normal Specificity</th>
                 <th className="py-3 px-4">Overall Accuracy</th>
-                <th className="py-3 px-4">False Alarm Rate</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#F5F2EB] text-[#1F2421]">
               <tr className="hover:bg-[#FAF8F5]">
                 <td className="py-3 px-4 font-semibold">Raw Corrupted (No Enhancement)</td>
-                <td className="py-3 px-4 text-[#5F6862]">0.0 dB (Baseline)</td>
-                <td className="py-3 px-4 text-[#C8644E] font-medium">82.0%</td>
-                <td className="py-3 px-4 text-[#C8644E] font-medium">45.0%</td>
-                <td className="py-3 px-4 text-[#C8644E]">63.5%</td>
-                <td className="py-3 px-4 text-[#C8644E] font-bold">55.0%</td>
+                <td className="py-3 px-4 text-[#5F6862]">24.33 dB (Baseline)</td>
+                <td className="py-3 px-4 text-[#C8644E] font-medium">0.821</td>
+                <td className="py-3 px-4 text-[#38563E] font-medium">99.7%</td>
+                <td className="py-3 px-4 text-[#C8644E] font-medium">33.8%</td>
+                <td className="py-3 px-4 text-[#C8644E] font-bold">75.0%</td>
               </tr>
               <tr className="hover:bg-[#FAF8F5]">
-                <td className="py-3 px-4 font-semibold">Standard Generic CLAHE</td>
-                <td className="py-3 px-4 text-[#5F6862]">+1.8 dB</td>
-                <td className="py-3 px-4 text-[#38563E] font-medium">96.0%</td>
-                <td className="py-3 px-4 text-[#C8644E] font-medium">52.0%</td>
-                <td className="py-3 px-4 text-[#5F6862]">74.0%</td>
-                <td className="py-3 px-4 text-[#C8644E] font-bold">48.0%</td>
+                <td className="py-3 px-4 font-semibold">Standard Generic (CLAHE + Bilateral)</td>
+                <td className="py-3 px-4 text-[#C8644E]">&minus;6.82 dB (17.51 dB)</td>
+                <td className="py-3 px-4 text-[#C8644E] font-medium">0.747</td>
+                <td className="py-3 px-4 text-[#38563E] font-medium">97.7%</td>
+                <td className="py-3 px-4 text-[#C8644E] font-medium">40.6%</td>
+                <td className="py-3 px-4 text-[#5F6862] font-bold">76.3%</td>
               </tr>
               <tr className="hover:bg-[#FAF8F5]">
                 <td className="py-3 px-4 font-semibold">FiLM + DenseNet-121 Solo</td>
-                <td className="py-3 px-4 text-[#38563E] font-medium">+10.6 dB</td>
-                <td className="py-3 px-4 text-[#38563E] font-bold">100.0%</td>
-                <td className="py-3 px-4 text-[#5F6862] font-medium">72.0%</td>
-                <td className="py-3 px-4 text-[#1F2421]">86.0%</td>
-                <td className="py-3 px-4 text-[#D9822B] font-medium">28.0%</td>
+                <td className="py-3 px-4 text-[#38563E] font-medium">+7.50 dB (31.83 dB)</td>
+                <td className="py-3 px-4 text-[#1F2421] font-medium">0.903</td>
+                <td className="py-3 px-4 text-[#38563E] font-medium">89.5%</td>
+                <td className="py-3 px-4 text-[#38563E] font-medium">76.5%</td>
+                <td className="py-3 px-4 text-[#1F2421]">84.6%</td>
               </tr>
               <tr className="bg-[#F4F7F4]/60 font-semibold border-t-2 border-[#C9D7C8]">
                 <td className="py-3.5 px-4 text-[#38563E] flex items-center gap-1.5">
                   <CheckCircle className="w-3.5 h-3.5" />
-                  AMIEDD (FiLM + 3-Model Consensus)
+                  AMIEDD (FiLM + 3-Model Consensus @ 0.50)
                 </td>
-                <td className="py-3.5 px-4 text-[#38563E] font-bold">+10.6 dB</td>
-                <td className="py-3.5 px-4 text-[#38563E] font-bold">100.0%</td>
-                <td className="py-3.5 px-4 text-[#38563E] font-bold">88.0%</td>
-                <td className="py-3.5 px-4 text-[#38563E] font-bold">94.0%</td>
-                <td className="py-3.5 px-4 text-[#38563E] font-bold">&lt; 12.0%</td>
+                <td className="py-3.5 px-4 text-[#38563E] font-bold">+7.50 dB (31.83 dB)</td>
+                <td className="py-3.5 px-4 text-[#38563E] font-bold">0.947</td>
+                <td className="py-3.5 px-4 text-[#38563E] font-bold">96.2%</td>
+                <td className="py-3.5 px-4 text-[#38563E] font-bold">80.3%</td>
+                <td className="py-3.5 px-4 text-[#38563E] font-bold">90.2%</td>
+              </tr>
+              <tr className="hover:bg-[#FAF8F5] text-[#5F6862]">
+                <td className="py-3 px-4 font-medium">Clean Baseline (Unmodified Test Scans)</td>
+                <td className="py-3 px-4">Reference</td>
+                <td className="py-3 px-4 font-medium">0.942</td>
+                <td className="py-3 px-4 font-medium">97.7%</td>
+                <td className="py-3 px-4 font-medium">76.5%</td>
+                <td className="py-3 px-4 font-semibold">89.7%</td>
               </tr>
             </tbody>
           </table>

@@ -37,13 +37,14 @@ class CXRDataset(Dataset):
         self.deterministic = deterministic
         self.seed = seed
 
-        # Collect image filepaths and labels
+        # Collect unique image filepaths and labels (iterdir avoids case-insensitive glob duplicates on Windows)
+        valid_exts = {".jpeg", ".jpg", ".png"}
         self.samples: List[Tuple[Path, int]] = []
         for class_name, label in self.CLASS_MAP.items():
             class_folder = self.root_dir / class_name
             if class_folder.exists():
-                for ext in ("*.jpeg", "*.jpg", "*.png", "*.JPEG", "*.JPG", "*.PNG"):
-                    for file_path in class_folder.glob(ext):
+                for file_path in class_folder.iterdir():
+                    if file_path.is_file() and file_path.suffix.lower() in valid_exts:
                         self.samples.append((file_path, label))
 
         if len(self.samples) == 0:

@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from PIL import Image
+import cv2
 import numpy as np
 
 # Ensure project root is in sys.path
@@ -30,21 +31,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global model state
+# Global model & calibration state
 device = None
 detector = None
 enhancer = None
 classifiers = {}
+calibration_cfg = None
+ensemble_weights = None
+triage_thresholds = None
+
+
+def _decode_grayscale_224(image_data: str) -> np.ndarray:
+    """Decode base64 image data into a [0, 1] float32 224x224 grayscale array matching training preprocessing."""
+    payload = image_data.split(",")[1] if "," in image_data else image_data
+    raw_bytes = base64.b64decode(payload)
+    pil_img = Image.open(io.BytesIO(raw_bytes)).convert("L")
+    img_np = np.array(pil_img, dtype=np.float32) / 255.0
+    return cv2.resize(img_np, (224, 224), interpolation=cv2.INTER_AREA).astype(np.float32)
 
 
 def load_models():
     """Load or initialize PyTorch models (Detector, FiLM Enhancer, and 3-Model Consensus Panel)."""
-    global device, detector, enhancer, classifiers
+    global device, detector, enhancer, classifiers, calibration_cfg, ensemble_weights, triage_thresholds
 
     import torch
     from src.models.degradation_detector import DegradationDetector
     from src.models.adaptive_unet import AdaptiveUNet
     from src.models.disease_classifier import DiseaseClassifier
+    from src.models.consensus import load_calibration_config
+
+    calibration_cfg, ensemble_weights, triage_thresholds = load_calibration_config()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[API Server] Initializing PyTorch models on: {device}")
@@ -140,17 +156,9 @@ def degrade_image(req: DegradeRequest):
     from src.degradations.pipeline import DegradationPipeline
 
     try:
-        image_data = req.image
-        if "," in image_data:
-            image_data = image_data.split(",")[1]
-        raw_bytes = base64.b64decode(image_data)
-        pil_img = Image.open(io.BytesIO(raw_bytes)).convert("L")
+        img_np = _decode_grayscale_224(req.image)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid clean image input: {e}")
-
-    # Standard model resolution 224x224
-    pil_resized = pil_img.resize((224, 224), Image.Resampling.BILINEAR)
-    img_np = np.array(pil_resized, dtype=np.float32) / 255.0
 
     # Apply exact physical degradation operators in order: Contrast -> Blur -> Noise -> Compression
     pipeline = DegradationPipeline()
@@ -175,26 +183,18 @@ def degrade_image(req: DegradeRequest):
 
 @app.post("/api/pipeline/predict", response_model=PredictResponse)
 def predict(req: PredictRequest):
-    global device, detector, enhancer, classifiers
+    global device, detector, enhancer, classifiers, calibration_cfg, ensemble_weights, triage_thresholds
 
     import torch
+    from src.models.consensus import predict_consensus_batch, classify_triage
 
-    if detector is None or enhancer is None or len(classifiers) < 3:
+    if detector is None or enhancer is None or len(classifiers) < 3 or calibration_cfg is None:
         load_models()
 
     try:
-        # Decode base64 image
-        image_data = req.image
-        if "," in image_data:
-            image_data = image_data.split(",")[1]
-        raw_bytes = base64.b64decode(image_data)
-        pil_img = Image.open(io.BytesIO(raw_bytes)).convert("L")  # Convert to Grayscale
+        img_np = _decode_grayscale_224(req.image)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid image format: {e}")
-
-    # Resize to standard model resolution (224x224)
-    pil_resized = pil_img.resize((224, 224), Image.Resampling.BILINEAR)
-    img_np = np.array(pil_resized, dtype=np.float32) / 255.0
 
     # Convert to PyTorch tensor [1, 1, 224, 224]
     deg_t = torch.from_numpy(img_np).unsqueeze(0).unsqueeze(0).to(device)
@@ -204,40 +204,34 @@ def predict(req: PredictRequest):
         pred_vector_t = detector.predict_vector(deg_t)
         pred_vector = pred_vector_t[0].cpu().numpy()
 
-        # Step 2: Model 2 restores/cleans image via FiLM conditioning
-        restored_t = enhancer(deg_t, pred_vector_t)
-        # Clamp to [0, 1]
-        restored_t = torch.clamp(restored_t, 0.0, 1.0)
+        # Step 2: Model 2 restores/cleans image via FiLM conditioning (pass-through when scan is clean)
+        if float(pred_vector_t.max().item()) < 0.01:
+            restored_t = deg_t
+        else:
+            restored_t = torch.clamp(enhancer(deg_t, pred_vector_t), 0.0, 1.0)
         restored_np = restored_t[0, 0].cpu().numpy()
 
-        # Step 3: Multi-Radiologist Consensus Ensemble Evaluation with Class-Imbalance Calibration
-        # EfficientNet-B0 has scale-invariant spatial pooling robust to residual high frequencies (50%)
-        # DenseNet-121 (30%) and ResNet-50 (20%) calibrated for 3:1 Kaggle class imbalance logit offset
-        ensemble_weights = {"efficientnet_b0": 0.50, "densenet121": 0.30, "resnet50": 0.20}
-        individual_restored = {}
-        individual_deg = {}
-        p_enh = 0.0
-        p_deg = 0.0
-
-        def get_calibrated_prob(clf, x, arch):
-            logits = clf(x)[0]
-            diff = logits[1] - logits[0]  # logit margin (pneumonia - normal)
-            if arch == "densenet121":
-                return torch.sigmoid((diff - 10.0) / 3.0).item()
-            elif arch == "resnet50":
-                return torch.sigmoid((diff - 6.0) / 2.5).item()
-            elif arch == "efficientnet_b0":
-                return torch.sigmoid((diff - 2.0) / 2.0).item()
-            return torch.softmax(logits, dim=0)[1].item()
-
-        for arch, clf in classifiers.items():
-            pr_deg = get_calibrated_prob(clf, deg_t, arch)
-            pr_enh = get_calibrated_prob(clf, restored_t, arch)
-            individual_deg[arch] = round(pr_deg * 100.0, 1)
-            individual_restored[arch] = round(pr_enh * 100.0, 1)
-            w = ensemble_weights.get(arch, 1.0 / len(classifiers))
-            p_deg += w * pr_deg
-            p_enh += w * pr_enh
+        # Step 3: Shared Degradation-Aware Calibrated 3-Radiologist Consensus Panel
+        p_deg_t, _ = predict_consensus_batch(
+            classifiers,
+            deg_t,
+            degradation_vector=pred_vector_t,
+            weights=ensemble_weights,
+            calibration=calibration_cfg,
+        )
+        p_enh_t, per_enh = predict_consensus_batch(
+            classifiers,
+            restored_t,
+            degradation_vector=pred_vector_t,
+            weights=ensemble_weights,
+            calibration=calibration_cfg,
+        )
+        p_deg = float(p_deg_t[0].item())
+        p_enh = float(p_enh_t[0].item())
+        individual_restored = {
+            arch: round(float(prob_t[0].item()) * 100.0, 1)
+            for arch, prob_t in per_enh.items()
+        }
 
     # Convert restored numpy array to PNG base64
     restored_uint8 = np.clip(restored_np * 255.0, 0, 255).astype(np.uint8)
@@ -252,19 +246,7 @@ def predict(req: PredictRequest):
     norm_pct = round((1.0 - p_enh) * 100.0, 1)
     corrupted_pneu_pct = round(p_deg * 100.0, 1)
 
-    # Consensus Triage: Safety-First (Sensitivity >= 99.5%, Specificity >= 88.0%)
-    if p_enh >= 0.75:
-        clinical_risk = "High Risk (Pneumonia Confirmed by Consensus)"
-        recommendation = "High consensus of radiopaque pulmonary consolidation. Confirmed pneumonia indicated."
-        has_pneu = True
-    elif p_enh >= 0.45:
-        clinical_risk = "Indeterminate / Borderline (Review Required)"
-        recommendation = "Equivocal findings across radiologist models. Flagged for urgent human radiologist review."
-        has_pneu = True  # Safety-first: flag so no patient is overlooked
-    else:
-        clinical_risk = "Low Risk (Normal)"
-        recommendation = "Clear lung fields with high multi-model consensus."
-        has_pneu = False
+    has_pneu, clinical_risk, recommendation = classify_triage(p_enh, thresholds=triage_thresholds)
 
     return PredictResponse(
         status="success",

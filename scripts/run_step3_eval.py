@@ -11,6 +11,7 @@ from src.data.cxr_dataset import CXRDataset
 from src.models.degradation_detector import DegradationDetector
 from src.models.adaptive_unet import AdaptiveUNet
 from src.models.disease_classifier import DiseaseClassifier
+from src.models.consensus import load_calibration_config, predict_consensus_batch
 from src.evaluation.compare_enhancement import evaluate_enhancement_pipeline
 from src.evaluation.visualize import plot_sample_comparison
 
@@ -22,7 +23,7 @@ def main():
 
     cfg = load_config("configs/default_config.yaml")
     set_seed(cfg["project"]["seed"])
-    device = get_device(preferred="cpu")
+    device = get_device(preferred="cpu", num_threads=cfg["project"]["num_threads"])
     print(f"[Step 3] Device: {device}")
 
     # Load test dataset
@@ -30,8 +31,8 @@ def main():
     image_size = tuple(cfg["data"]["image_size"])
     test_ds = CXRDataset(dataset_dir, split="test", image_size=image_size, deterministic=True)
     num_workers = 0 if sys.platform.startswith("win") else 2
-    test_loader = DataLoader(test_ds, batch_size=8, shuffle=False, num_workers=num_workers)
-    print(f"[Step 3] Loaded {len(test_ds)} test images from {dataset_dir / 'test'}")
+    test_loader = DataLoader(test_ds, batch_size=32, shuffle=False, num_workers=num_workers)
+    print(f"[Step 3] Loaded {len(test_ds)} unique test images from {dataset_dir / 'test'}")
 
     # Load Model 1 (Problem Detective)
     det_ckpt = Path(cfg["detector"]["checkpoint_dir"]) / "best_detector.pth"
@@ -89,17 +90,29 @@ def main():
     sample_batch = next(iter(test_loader))
     deg_s, clean_s, vec_s, label_s = sample_batch
 
+    calibration_cfg, ensemble_weights, _ = load_calibration_config()
     with torch.no_grad():
         pred_v = detector.predict_vector(deg_s[:1].to(device))
-        restored = enhancer(deg_s[:1].to(device), pred_v)
+        restored = torch.clamp(enhancer(deg_s[:1].to(device), pred_v), 0.0, 1.0)
+        zero_v = torch.zeros_like(pred_v)
 
-        probs_dict = {}
-        for name, m in disease_models.items():
-            m.eval()
-            p_clean = m.predict_proba(clean_s[:1].to(device))[0, 1].item()
-            p_deg = m.predict_proba(deg_s[:1].to(device))[0, 1].item()
-            p_enh = m.predict_proba(restored)[0, 1].item()
-            probs_dict[name] = {"Clean": p_clean, "Degraded": p_deg, "Adaptive": p_enh}
+        p_clean_ens, per_clean = predict_consensus_batch(disease_models, clean_s[:1].to(device), zero_v, ensemble_weights, calibration_cfg)
+        p_deg_ens, per_deg = predict_consensus_batch(disease_models, deg_s[:1].to(device), pred_v, ensemble_weights, calibration_cfg)
+        p_enh_ens, per_enh = predict_consensus_batch(disease_models, restored, pred_v, ensemble_weights, calibration_cfg)
+
+        probs_dict = {
+            "Consensus Ensemble": {
+                "Clean": float(p_clean_ens[0].item()),
+                "Degraded": float(p_deg_ens[0].item()),
+                "Adaptive": float(p_enh_ens[0].item()),
+            }
+        }
+        for name in disease_models.keys():
+            probs_dict[name] = {
+                "Clean": float(per_clean[name][0].item()),
+                "Degraded": float(per_deg[name][0].item()),
+                "Adaptive": float(per_enh[name][0].item()),
+            }
 
     plot_sample_comparison(
         clean_np=clean_s[0, 0].numpy(),

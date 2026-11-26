@@ -46,10 +46,10 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onGoToStudio }) => {
           <div className="w-10 h-10 rounded-2xl bg-[#E6ECE5] flex items-center justify-center text-[#38563E] mb-4">
             <Sparkles className="w-5 h-5" />
           </div>
-          <p className="text-3xl font-bold text-[#1F2421] tracking-tight">+10.6 dB</p>
+          <p className="text-3xl font-bold text-[#1F2421] tracking-tight">+7.5 dB</p>
           <p className="text-sm font-semibold text-[#38563E] mt-1">PSNR Clarity Gain</p>
           <p className="text-xs text-[#5F6862] mt-2 leading-relaxed">
-            Restores obscured rib contours and fine bronchial vascular markings without hallucinations.
+            Lifts degraded scans from 24.3 dB to 31.8 dB (0.875 SSIM) across 624 unique Kaggle test scans.
           </p>
         </div>
 
@@ -57,10 +57,10 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onGoToStudio }) => {
           <div className="w-10 h-10 rounded-2xl bg-[#E6ECE5] flex items-center justify-center text-[#38563E] mb-4">
             <ShieldCheck className="w-5 h-5" />
           </div>
-          <p className="text-3xl font-bold text-[#1F2421] tracking-tight">100.0%</p>
-          <p className="text-sm font-semibold text-[#38563E] mt-1">Pneumonia Sensitivity</p>
+          <p className="text-3xl font-bold text-[#1F2421] tracking-tight">97.2%</p>
+          <p className="text-sm font-semibold text-[#38563E] mt-1">Triage Sensitivity</p>
           <p className="text-xs text-[#5F6862] mt-2 leading-relaxed">
-            Zero missed pneumonia cases across extensive multi-model test sets, prioritizing patient safety.
+            Safety-first borderline triage (&ge;45%) catches 97.2% of restored cases (98.5% on clean scans).
           </p>
         </div>
 
@@ -68,10 +68,10 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onGoToStudio }) => {
           <div className="w-10 h-10 rounded-2xl bg-[#FAF4F2] flex items-center justify-center text-[#C8644E] mb-4">
             <CheckCircle className="w-5 h-5" />
           </div>
-          <p className="text-3xl font-bold text-[#1F2421] tracking-tight">94.0%</p>
-          <p className="text-sm font-semibold text-[#944432] mt-1">Consensus Diagnostic Accuracy</p>
+          <p className="text-3xl font-bold text-[#1F2421] tracking-tight">90.2%</p>
+          <p className="text-sm font-semibold text-[#944432] mt-1">Restored Accuracy (0.947 AUC)</p>
           <p className="text-xs text-[#5F6862] mt-2 leading-relaxed">
-            Multi-radiologist panel cuts single-model false alarms on healthy lungs by over 60%.
+            Recovers +15.2% accuracy over raw degraded scans and cuts false alarms from 66.2% down to 19.7%.
           </p>
         </div>
 
@@ -189,7 +189,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onGoToStudio }) => {
                 </li>
               </ul>
               <div className="mt-3 p-2 bg-[#F5F2EB] rounded-xl text-[11px] text-[#5F6862]">
-                Guarantees safety-first triage with 0 missed pneumonia cases.
+                Paired clean+restored domain adaptation achieves 90.2% accuracy and 0.947 AUC-ROC.
               </div>
             </div>
           </div>
@@ -214,9 +214,9 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onGoToStudio }) => {
               Naive Methods (CLAHE / Unsharp Mask / Generic Bilateral)
             </div>
             <ul className="text-xs text-[#5F6862] space-y-2 leading-relaxed">
-              <li>&bull; <strong className="text-[#944432]">Noise Amplification:</strong> Equalizing contrast elevates sensor noise floor into pseudo-consolidations.</li>
-              <li>&bull; <strong className="text-[#944432]">False Positive Surge:</strong> Single classifiers mistake sharpened noise granules for bacterial infiltrates (28% false alarm rate).</li>
-              <li>&bull; <strong className="text-[#944432]">Edge Halo Artifacts:</strong> Sharpening introduces artificial white halos around ribs that mimic pleural thickening.</li>
+              <li>&bull; <strong className="text-[#944432]">Pixel Fidelity Loss:</strong> Histogram equalization shifts radiographic density, dropping PSNR to 17.5 dB.</li>
+              <li>&bull; <strong className="text-[#944432]">False Positive Surge:</strong> Unrestored noise and CLAHE artifacts drive healthy-lung false alarms to 59–66%.</li>
+              <li>&bull; <strong className="text-[#944432]">Edge Halo Artifacts:</strong> Sharpening introduces artificial edges around ribs that mimic pleural thickening.</li>
             </ul>
           </div>
 
@@ -226,9 +226,9 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onGoToStudio }) => {
               AMIEDD Adaptive FiLM + Consensus Triage
             </div>
             <ul className="text-xs text-[#5F6862] space-y-2 leading-relaxed">
-              <li>&bull; <strong className="text-[#38563E]">Conditioned Denoising:</strong> Knows the exact quantum noise level and subtracts it while preserving subtle parenchymal textures.</li>
-              <li>&bull; <strong className="text-[#38563E]">Consensus Agreement:</strong> Triple-backbone voting suppresses single-network biases and reduces false alarms to &lt;12%.</li>
-              <li>&bull; <strong className="text-[#38563E]">Zero Compromise on Lives:</strong> Thresholding guarantees 100% sensitivity; borderline cases are flagged for human radiologists.</li>
+              <li>&bull; <strong className="text-[#38563E]">Conditioned Denoising:</strong> Knows the exact quantum noise level and restores SSIM from 0.549 to 0.875.</li>
+              <li>&bull; <strong className="text-[#38563E]">Consensus Agreement:</strong> Triple-backbone voting boosts specificity on restored scans from 33.8% to 80.3%.</li>
+              <li>&bull; <strong className="text-[#38563E]">Safety-First Triage:</strong> 3-tier probability thresholds flag borderline scans (&ge;45%) for human radiologist review.</li>
             </ul>
           </div>
         </div>

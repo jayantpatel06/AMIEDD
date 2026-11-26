@@ -14,6 +14,7 @@ from src.degradations.pipeline import DegradationPipeline
 from src.models.degradation_detector import DegradationDetector
 from src.models.adaptive_unet import AdaptiveUNet
 from src.models.disease_classifier import DiseaseClassifier
+from src.models.consensus import load_calibration_config, predict_consensus_batch
 from src.evaluation.visualize import plot_sample_comparison
 from src.evaluation.metrics import compute_image_metrics
 
@@ -83,22 +84,35 @@ def main():
     deg_t = torch.from_numpy(degraded).unsqueeze(0).unsqueeze(0).float()
     clean_t = torch.from_numpy(clean).unsqueeze(0).unsqueeze(0).float()
 
+    calibration_cfg, ensemble_weights, _ = load_calibration_config()
     with torch.no_grad():
         # Step 1: Diagnose
         pred_vector_t = detector.predict_vector(deg_t)
         pred_vector = pred_vector_t[0].numpy()
 
         # Step 2: Restore
-        restored_t = enhancer(deg_t, pred_vector_t)
+        restored_t = torch.clamp(enhancer(deg_t, pred_vector_t), 0.0, 1.0)
         restored = restored_t[0, 0].numpy()
+        zero_v = torch.zeros_like(pred_vector_t)
 
-        # Step 3: Disease probability across panel
-        probs_dict = {}
-        for arch, m in disease_models.items():
-            p_clean = m.predict_proba(clean_t)[0, 1].item()
-            p_deg = m.predict_proba(deg_t)[0, 1].item()
-            p_enh = m.predict_proba(restored_t)[0, 1].item()
-            probs_dict[arch] = {"Clean": p_clean, "Degraded": p_deg, "Adaptive": p_enh}
+        # Step 3: Calibrated Disease probability across panel
+        p_clean_ens, per_clean = predict_consensus_batch(disease_models, clean_t, zero_v, ensemble_weights, calibration_cfg)
+        p_deg_ens, per_deg = predict_consensus_batch(disease_models, deg_t, pred_vector_t, ensemble_weights, calibration_cfg)
+        p_enh_ens, per_enh = predict_consensus_batch(disease_models, restored_t, pred_vector_t, ensemble_weights, calibration_cfg)
+
+        p_clean = float(p_clean_ens[0].item())
+        p_deg = float(p_deg_ens[0].item())
+        p_enh = float(p_enh_ens[0].item())
+
+        probs_dict = {
+            "Consensus Ensemble": {"Clean": p_clean, "Degraded": p_deg, "Adaptive": p_enh}
+        }
+        for arch in disease_models.keys():
+            probs_dict[arch] = {
+                "Clean": float(per_clean[arch][0].item()),
+                "Degraded": float(per_deg[arch][0].item()),
+                "Adaptive": float(per_enh[arch][0].item()),
+            }
 
     # Compute PSNR
     m_deg = compute_image_metrics(degraded, clean)

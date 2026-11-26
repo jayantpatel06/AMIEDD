@@ -1,0 +1,29 @@
+{
+  "description": "Platt calibration parameters fitted on untouched Kaggle val/ split after paired clean+restored domain adaptation",
+  "ensemble_weights": {
+    "efficientnet_b0": 0.5,
+    "densenet121": 0.3,
+    "resnet50": 0.2
+  },
+  "triage_thresholds": {
+    "high_risk": 0.75,
+    "borderline": 0.45
+  },
+  "classifiers": {
+    "efficientnet_b0": {
+      "bias_base": 1.037,
+      "bias_deg_slope": 0.339,
+      "temperature": 0.8
+    },
+    "densenet121": {
+      "bias_base": 0.987,
+      "bias_deg_slope": 0.533,
+      "temperature": 0.825
+    },
+    "resnet50": {
+      "bias_base": 1.796,
+      "bias_deg_slope": 0.0,
+      "temperature": 0.8
+    }
+  }
+}

@@ -15,6 +15,7 @@ from src.data.download_kaggle import setup_kaggle_dataset, generate_synthetic_sa
 from src.models.degradation_detector import DegradationDetector
 from src.models.adaptive_unet import AdaptiveUNet
 from src.models.disease_classifier import DiseaseClassifier
+from src.models.consensus import load_calibration_config, predict_consensus_batch
 from src.training.train_detector import train_detector
 from src.training.train_enhancer import train_enhancer
 from src.evaluation.compare_enhancement import evaluate_enhancement_pipeline
@@ -187,17 +188,29 @@ def main():
 
         detector.eval()
         enhancer.eval()
+        calibration_cfg, ensemble_weights, _ = load_calibration_config()
         with torch.no_grad():
             pred_v = detector.predict_vector(deg_sample[:1].to(device))
-            restored = enhancer(deg_sample[:1].to(device), pred_v)
+            restored = torch.clamp(enhancer(deg_sample[:1].to(device), pred_v), 0.0, 1.0)
+            zero_v = torch.zeros_like(pred_v)
 
-            probs_dict = {}
-            for name, m in disease_models.items():
-                m.eval()
-                p_clean = m.predict_proba(clean_sample[:1].to(device))[0, 1].item()
-                p_deg = m.predict_proba(deg_sample[:1].to(device))[0, 1].item()
-                p_enh = m.predict_proba(restored)[0, 1].item()
-                probs_dict[name] = {"Clean": p_clean, "Degraded": p_deg, "Adaptive": p_enh}
+            p_clean_ens, per_clean = predict_consensus_batch(disease_models, clean_sample[:1].to(device), zero_v, ensemble_weights, calibration_cfg)
+            p_deg_ens, per_deg = predict_consensus_batch(disease_models, deg_sample[:1].to(device), pred_v, ensemble_weights, calibration_cfg)
+            p_enh_ens, per_enh = predict_consensus_batch(disease_models, restored, pred_v, ensemble_weights, calibration_cfg)
+
+            probs_dict = {
+                "Consensus Ensemble": {
+                    "Clean": float(p_clean_ens[0].item()),
+                    "Degraded": float(p_deg_ens[0].item()),
+                    "Adaptive": float(p_enh_ens[0].item()),
+                }
+            }
+            for name in disease_models.keys():
+                probs_dict[name] = {
+                    "Clean": float(per_clean[name][0].item()),
+                    "Degraded": float(per_deg[name][0].item()),
+                    "Adaptive": float(per_enh[name][0].item()),
+                }
 
         plot_sample_comparison(
             clean_np=clean_sample[0, 0].numpy(),

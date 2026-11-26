@@ -37,6 +37,6 @@ export interface HealthResponse {
 export interface DegradationSettings {
   noise: number;       // 0 to 100
   blur: number;        // 0 to 10
-  contrast: number;    // -50 to 50
+  contrast: number;    // 0 to 100 (dynamic range compression)
   compression: number; // 0 (lossless) to 100 (heavy)
 }

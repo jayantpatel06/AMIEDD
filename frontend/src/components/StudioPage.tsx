@@ -101,7 +101,7 @@ export const StudioPage: React.FC = () => {
   const [degradation, setDegradation] = useState<DegradationSettings>({
     noise: 40,
     blur: 2.5,
-    contrast: -15,
+    contrast: 30,
     compression: 65,
   });
 
@@ -109,10 +109,12 @@ export const StudioPage: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [prediction, setPrediction] = useState<PredictResponse | null>(null);
+  const [previewMode, setPreviewMode] = useState<'slider' | 'degraded'>('slider');
 
-  // Canvas ref for real-time client-side degradation synthesis
+  // Canvas & scroll refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const baseImgRef = useRef<HTMLImageElement | null>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   // Exact Physical Degradation Synthesis (matches Python training pipeline 1:1)
   const applyDegradations = useCallback(() => {
@@ -143,7 +145,7 @@ export const StudioPage: React.FC = () => {
     }
 
     // --- STEP 1: PHYSICAL CONTRAST REDUCTION (Sensor dynamic range loss) ---
-    const s_contrast = Math.min(1.0, Math.max(0.0, Math.abs(degradation.contrast) / 50.0));
+    const s_contrast = Math.min(1.0, Math.max(0.0, degradation.contrast / 100.0));
     if (s_contrast > 0.0) {
       let sum = 0;
       for (let i = 0; i < N; i++) sum += pixels[i];
@@ -189,10 +191,14 @@ export const StudioPage: React.FC = () => {
 
     // --- STEP 4: PHYSICAL JPEG PACS TRANSMISSION COMPRESSION ---
     const s_comp = Math.min(1.0, Math.max(0.0, degradation.compression / 100.0));
-    const qualityInt = s_comp > 0 ? Math.round(75 - s_comp * 65) : 95;
-    const jpegQuality = Math.max(0.08, Math.min(0.95, qualityInt / 100));
-    const finalDataUrl = canvas.toDataURL('image/jpeg', jpegQuality);
-    setDegradedDataUrl(finalDataUrl);
+    if (s_comp > 0) {
+      const qualityInt = Math.round(75 - s_comp * 65);
+      const jpegQuality = Math.max(0.08, Math.min(0.95, qualityInt / 100));
+      setDegradedDataUrl(canvas.toDataURL('image/jpeg', jpegQuality));
+    } else {
+      // Preserve lossless PNG transport when compression slider is 0%
+      setDegradedDataUrl(canvas.toDataURL('image/png'));
+    }
   }, [degradation]);
 
   // Load new base image whenever selectedImageSrc changes
@@ -241,7 +247,7 @@ export const StudioPage: React.FC = () => {
     setDegradation({
       noise: Math.floor(20 + Math.random() * 50),
       blur: Number((1.0 + Math.random() * 3.5).toFixed(1)),
-      contrast: Math.floor(-35 + Math.random() * 25),
+      contrast: Math.floor(20 + Math.random() * 55),
       compression: Math.floor(40 + Math.random() * 50),
     });
   };
@@ -249,19 +255,25 @@ export const StudioPage: React.FC = () => {
   // Download corrupted image
   const handleDownloadDegraded = () => {
     if (!degradedDataUrl) return;
+    const ext = degradedDataUrl.startsWith('data:image/png') ? 'png' : 'jpg';
     const a = document.createElement('a');
     a.href = degradedDataUrl;
-    a.download = `corrupted_cxr_amiedd_${Date.now()}.jpg`;
+    a.download = `corrupted_cxr_amiedd_${Date.now()}.${ext}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
   };
 
-  // Send image to API pipeline
+  // Send image to API pipeline and scroll smoothly down to results
   const handleRunPipeline = async () => {
     if (!degradedDataUrl) return;
     setIsProcessing(true);
     setErrorMsg(null);
+    setPreviewMode('slider');
+
+    requestAnimationFrame(() => {
+      resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
 
     try {
       const response = await fetch('/api/pipeline/predict', {
@@ -280,6 +292,9 @@ export const StudioPage: React.FC = () => {
 
       const data: PredictResponse = await response.json();
       setPrediction(data);
+      requestAnimationFrame(() => {
+        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     } catch (err: unknown) {
       console.error('Pipeline error:', err);
       const msg = err instanceof Error ? err.message : String(err);
@@ -424,22 +439,22 @@ export const StudioPage: React.FC = () => {
             {/* Slider 3: Contrast Miscalibration */}
             <div className="space-y-1.5">
               <div className="flex justify-between text-xs">
-                <span className="font-medium text-[#1F2421]">Exposure / Contrast Shift</span>
+                <span className="font-medium text-[#1F2421]">Exposure / Contrast Loss</span>
                 <span className="font-mono text-[#5F6862]">
-                  {degradation.contrast > 0 ? `+${degradation.contrast}` : degradation.contrast}%
+                  {degradation.contrast}%
                 </span>
               </div>
               <input
                 type="range"
-                min="-50"
-                max="50"
+                min="0"
+                max="100"
                 value={degradation.contrast}
                 onChange={(e) =>
                   setDegradation({ ...degradation, contrast: parseInt(e.target.value) })
                 }
               />
               <span className="text-[10px] text-[#5F6862] block">
-                Negative is underexposed / washed out, positive is overexposed
+                Simulates underexposed dynamic-range compression (0.75&times; down to 0.20&times;)
               </span>
             </div>
 
@@ -502,289 +517,343 @@ export const StudioPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Column: Live Corrupted Preview OR Pipeline Results (7 cols) */}
+        {/* Right Column: Live Corrupted Preview & Interactive Restoration Slider (7 cols) */}
         <div className="lg:col-span-7 space-y-6">
-          {!prediction ? (
-            /* Standalone Live Degradation Preview prior to running pipeline */
-            <div className="p-6 rounded-3xl bg-white border border-[#EBE5D8] shadow-soft space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-base font-bold text-[#1F2421]">Degraded Scan Preview</h3>
-                  <p className="text-xs text-[#5F6862]">
-                    Move sliders on the left to observe live changes before dispatching to pipeline
-                  </p>
+          <div className="p-6 rounded-3xl bg-white border border-[#EBE5D8] shadow-soft space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                {prediction ? (
+                  <>
+                    <Sparkles className="w-4 h-4 text-[#4F7757]" />
+                    <div>
+                      <h3 className="text-base font-bold text-[#1F2421]">
+                        Interactive FiLM Restoration Slider
+                      </h3>
+                      <p className="text-xs text-[#5F6862]">
+                        Drag left/right to compare corrupted input against Model 2 restoration
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    <h3 className="text-base font-bold text-[#1F2421]">Degraded Scan Preview</h3>
+                    <p className="text-xs text-[#5F6862]">
+                      Move sliders on the left to observe live changes before dispatching to pipeline
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {prediction ? (
+                <div className="flex items-center gap-1.5 bg-[#F5F2EB] p-1 rounded-xl border border-[#EBE5D8]">
+                  <button
+                    onClick={() => setPreviewMode('slider')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+                      previewMode === 'slider'
+                        ? 'bg-white text-[#38563E] shadow-sm'
+                        : 'text-[#5F6862] hover:text-[#1F2421]'
+                    }`}
+                  >
+                    Restoration Slider
+                  </button>
+                  <button
+                    onClick={() => setPreviewMode('degraded')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+                      previewMode === 'degraded'
+                        ? 'bg-white text-[#1F2421] shadow-sm'
+                        : 'text-[#5F6862] hover:text-[#1F2421]'
+                    }`}
+                  >
+                    Live Degraded
+                  </button>
                 </div>
+              ) : (
                 <span className="text-[11px] font-medium px-2.5 py-1 rounded-xl bg-[#F5F2EB] text-[#5F6862]">
                   Live Client View
                 </span>
-              </div>
+              )}
+            </div>
 
+            {prediction && previewMode === 'slider' ? (
+              <ImageComparisonSlider
+                originalImage={degradedDataUrl}
+                cleanedImage={prediction.cleaned_image}
+                originalLabel="Corrupted Input"
+                cleanedLabel="AMIEDD FiLM Restored"
+              />
+            ) : (
               <div className="flex justify-center p-4 bg-[#FAF8F5] rounded-3xl border border-[#EBE5D8]">
                 {degradedDataUrl ? (
                   <img
                     src={degradedDataUrl}
                     alt="Degraded Preview"
-                    className="max-w-[360px] w-full aspect-square rounded-2xl object-contain shadow-sm border border-[#EBE5D8]"
+                    className="max-w-[380px] w-full aspect-square rounded-2xl object-contain shadow-sm border border-[#EBE5D8]"
                   />
                 ) : (
-                  <div className="w-[360px] aspect-square rounded-2xl bg-[#F5F2EB] flex items-center justify-center text-xs text-[#5F6862]">
+                  <div className="w-[380px] aspect-square rounded-2xl bg-[#F5F2EB] flex items-center justify-center text-xs text-[#5F6862]">
                     Loading scan...
                   </div>
                 )}
               </div>
+            )}
 
-              <div className="p-4 rounded-2xl bg-[#F5F2EB]/70 border border-[#EBE5D8] flex items-start gap-3 text-xs text-[#5F6862]">
-                <Info className="w-4 h-4 shrink-0 text-[#A89775] mt-0.5" />
-                <p>
-                  Click <strong className="text-[#1F2421]">Send to AI Pipeline</strong> to run Model 1 (corruption estimator), Model 2 (FiLM restorer), and Model 3 (3-model consensus diagnostic panel).
-                </p>
-              </div>
+            <div className="p-4 rounded-2xl bg-[#F5F2EB]/70 border border-[#EBE5D8] flex items-start gap-3 text-xs text-[#5F6862]">
+              <Info className="w-4 h-4 shrink-0 text-[#A89775] mt-0.5" />
+              <p>
+                {prediction
+                  ? 'Restoration complete. Review the Model 1 Degradation & Error table and Model 3 Consensus Panel side by side below, or adjust sliders and click Send to AI Pipeline again.'
+                  : <>Click <strong className="text-[#1F2421]">Send to AI Pipeline</strong> to run Model 1 (corruption estimator), Model 2 (FiLM restorer), and Model 3 (3-model consensus diagnostic panel).</>}
+              </p>
             </div>
-          ) : (
-            /* Results View after running pipeline */
-            <div className="space-y-6">
-              {/* Interactive Comparison Slider */}
-              <div className="p-6 rounded-3xl bg-white border border-[#EBE5D8] shadow-soft space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-[#4F7757]" />
-                    <h3 className="text-base font-bold text-[#1F2421]">
-                      Interactive FiLM Restoration Slider
-                    </h3>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom Results Row: Model 1 (Degradation & Error) + Model 3 (Consensus Panel) Side by Side */}
+      {(isProcessing || prediction) && (
+        <div ref={resultsRef} className="scroll-mt-24 space-y-4 pt-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-[#1F2421] tracking-tight">
+              Pipeline Diagnostic Results
+            </h3>
+            {isProcessing && (
+              <span className="inline-flex items-center gap-2 text-xs font-medium text-[#5F6862] px-3 py-1 rounded-full bg-[#F5F2EB] border border-[#EBE5D8]">
+                <span className="w-3 h-3 border-2 border-[#3D3627]/30 border-t-[#3D3627] rounded-full animate-spin" />
+                Running 3-stage neural pipeline...
+              </span>
+            )}
+          </div>
+
+          {prediction ? (
+            <div className={`grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch transition-opacity ${isProcessing ? 'opacity-60' : 'opacity-100'}`}>
+              {/* Left Result Card: Model 1 Continuous Physical Corruption Vector & Estimation Error */}
+              <div className="p-6 rounded-3xl bg-white border border-[#EBE5D8] shadow-soft space-y-4 flex flex-col justify-between">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-bold text-[#1F2421] uppercase tracking-wider flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-[#5F6862]" />
+                      Model 1: Degradation &amp; Estimation Error
+                    </h4>
+                    <span className="text-[11px] font-mono text-[#5F6862]">
+                      Scale [0.00 – 1.00]
+                    </span>
                   </div>
-                  <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#E6ECE5] text-[#38563E]">
-                    Restoration Complete
-                  </span>
+
+                  <p className="text-xs text-[#5F6862] leading-relaxed">
+                    Comparison between your injected slider severities (<span className="font-mono text-[#1F2421]">0.00</span> clean to <span className="font-mono text-[#1F2421]">1.00</span> max) and what Model 1 diagnosed blindly:
+                  </p>
+
+                  {/* Detailed Comparison Table */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-[#EBE5D8] text-[10px] uppercase text-[#5F6862] tracking-wider">
+                          <th className="py-2 px-2.5">Degradation Type</th>
+                          <th className="py-2 px-2.5">Injected</th>
+                          <th className="py-2 px-2.5">Detected</th>
+                          <th className="py-2 px-2.5">Error (&Delta;)</th>
+                          <th className="py-2 px-2.5">Accuracy</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#F5F2EB] font-mono text-xs">
+                        {/* Noise */}
+                        {(() => {
+                          const inputVal = degradation.noise / 100;
+                          const detectedVal = prediction.diagnosed_vector.noise;
+                          const err = detectedVal - inputVal;
+                          const absErr = Math.abs(err);
+                          const acc = Math.max(0, 100 - absErr * 100).toFixed(1);
+                          return (
+                            <tr className="hover:bg-[#FAF8F5]">
+                              <td className="py-2.5 px-2.5 font-sans font-semibold text-[#1F2421]">
+                                Quantum Sensor Noise
+                              </td>
+                              <td className="py-2.5 px-2.5 text-[#5F6862]">
+                                {inputVal.toFixed(3)} <span className="font-sans text-[11px]">({degradation.noise}%)</span>
+                              </td>
+                              <td className="py-2.5 px-2.5 font-bold text-[#1F2421]">
+                                {detectedVal.toFixed(3)}
+                              </td>
+                              <td className={`py-2.5 px-2.5 font-semibold ${absErr < 0.1 ? 'text-[#38563E]' : 'text-[#D9822B]'}`}>
+                                {err >= 0 ? `+${err.toFixed(3)}` : err.toFixed(3)}
+                              </td>
+                              <td className="py-2.5 px-2.5 text-[#38563E] font-bold font-sans">
+                                {acc}%
+                              </td>
+                            </tr>
+                          );
+                        })()}
+
+                        {/* Blur */}
+                        {(() => {
+                          const inputVal = degradation.blur / 8.0;
+                          const detectedVal = prediction.diagnosed_vector.blur;
+                          const err = detectedVal - inputVal;
+                          const absErr = Math.abs(err);
+                          const acc = Math.max(0, 100 - absErr * 100).toFixed(1);
+                          return (
+                            <tr className="hover:bg-[#FAF8F5]">
+                              <td className="py-2.5 px-2.5 font-sans font-semibold text-[#1F2421]">
+                                Respiratory Blur
+                              </td>
+                              <td className="py-2.5 px-2.5 text-[#5F6862]">
+                                {inputVal.toFixed(3)} <span className="font-sans text-[11px]">({degradation.blur}px)</span>
+                              </td>
+                              <td className="py-2.5 px-2.5 font-bold text-[#1F2421]">
+                                {detectedVal.toFixed(3)}
+                              </td>
+                              <td className={`py-2.5 px-2.5 font-semibold ${absErr < 0.1 ? 'text-[#38563E]' : 'text-[#D9822B]'}`}>
+                                {err >= 0 ? `+${err.toFixed(3)}` : err.toFixed(3)}
+                              </td>
+                              <td className="py-2.5 px-2.5 text-[#38563E] font-bold font-sans">
+                                {acc}%
+                              </td>
+                            </tr>
+                          );
+                        })()}
+
+                        {/* Contrast */}
+                        {(() => {
+                          const inputVal = degradation.contrast / 100;
+                          const detectedVal = prediction.diagnosed_vector.contrast;
+                          const err = detectedVal - inputVal;
+                          const absErr = Math.abs(err);
+                          const acc = Math.max(0, 100 - absErr * 100).toFixed(1);
+                          return (
+                            <tr className="hover:bg-[#FAF8F5]">
+                              <td className="py-2.5 px-2.5 font-sans font-semibold text-[#1F2421]">
+                                Contrast Loss
+                              </td>
+                              <td className="py-2.5 px-2.5 text-[#5F6862]">
+                                {inputVal.toFixed(3)} <span className="font-sans text-[11px]">({degradation.contrast}%)</span>
+                              </td>
+                              <td className="py-2.5 px-2.5 font-bold text-[#1F2421]">
+                                {detectedVal.toFixed(3)}
+                              </td>
+                              <td className={`py-2.5 px-2.5 font-semibold ${absErr < 0.1 ? 'text-[#38563E]' : 'text-[#D9822B]'}`}>
+                                {err >= 0 ? `+${err.toFixed(3)}` : err.toFixed(3)}
+                              </td>
+                              <td className="py-2.5 px-2.5 text-[#38563E] font-bold font-sans">
+                                {acc}%
+                              </td>
+                            </tr>
+                          );
+                        })()}
+
+                        {/* Compression */}
+                        {(() => {
+                          const inputVal = degradation.compression / 100;
+                          const detectedVal = prediction.diagnosed_vector.compression;
+                          const err = detectedVal - inputVal;
+                          const absErr = Math.abs(err);
+                          const acc = Math.max(0, 100 - absErr * 100).toFixed(1);
+                          return (
+                            <tr className="hover:bg-[#FAF8F5]">
+                              <td className="py-2.5 px-2.5 font-sans font-semibold text-[#1F2421]">
+                                PACS JPEG Comp.
+                              </td>
+                              <td className="py-2.5 px-2.5 text-[#5F6862]">
+                                {inputVal.toFixed(3)} <span className="font-sans text-[11px]">({degradation.compression}%)</span>
+                              </td>
+                              <td className="py-2.5 px-2.5 font-bold text-[#1F2421]">
+                                {detectedVal.toFixed(3)}
+                              </td>
+                              <td className={`py-2.5 px-2.5 font-semibold ${absErr < 0.1 ? 'text-[#38563E]' : 'text-[#D9822B]'}`}>
+                                {err >= 0 ? `+${err.toFixed(3)}` : err.toFixed(3)}
+                              </td>
+                              <td className="py-2.5 px-2.5 text-[#38563E] font-bold font-sans">
+                                {acc}%
+                              </td>
+                            </tr>
+                          );
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
 
-                <ImageComparisonSlider
-                  originalImage={degradedDataUrl}
-                  cleanedImage={prediction.cleaned_image}
-                  originalLabel="Corrupted Input"
-                  cleanedLabel="AMIEDD FiLM Restored"
-                />
+                <div className="p-3 rounded-2xl bg-[#FAF8F5] border border-[#EBE5D8] text-[11px] text-[#5F6862]">
+                  Model 2 (FiLM U-Net) conditions every decoder block on this detected 4D vector to reverse each artifact proportionally.
+                </div>
               </div>
 
-              {/* Model 1: Continuous Physical Corruption Vector & Estimation Error */}
-              <div className="p-6 rounded-3xl bg-white border border-[#EBE5D8] shadow-soft space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-[#1F2421] uppercase tracking-wider flex items-center gap-1.5">
-                    <Layers className="w-3.5 h-3.5 text-[#5F6862]" />
-                    Model 1: Injected vs. Detected Degradation & Error
-                  </h4>
-                  <span className="text-[11px] font-mono text-[#5F6862]">
-                    Normalized Scale [0.00 – 1.00]
-                  </span>
-                </div>
-
-                <p className="text-xs text-[#5F6862] leading-relaxed">
-                  The model operates on a normalized continuous scale from <span className="font-mono text-[#1F2421]">0.00</span> (clean) to <span className="font-mono text-[#1F2421]">1.00</span> (maximum corruption). Below is the comparison between your slider inputs and what Model 1 detected blindly:
-                </p>
-
-                {/* Detailed Comparison Table */}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-[#EBE5D8] text-[10px] uppercase text-[#5F6862] tracking-wider">
-                        <th className="py-2 px-3">Degradation Type</th>
-                        <th className="py-2 px-3">Slider Injected</th>
-                        <th className="py-2 px-3">Model 1 Detected</th>
-                        <th className="py-2 px-3">Estimation Error (&Delta;)</th>
-                        <th className="py-2 px-3">Detector Accuracy</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#F5F2EB] font-mono text-xs">
-                      {/* Noise */}
-                      {(() => {
-                        const inputVal = degradation.noise / 100;
-                        const detectedVal = prediction.diagnosed_vector.noise;
-                        const err = detectedVal - inputVal;
-                        const absErr = Math.abs(err);
-                        const acc = Math.max(0, 100 - absErr * 100).toFixed(1);
-                        return (
-                          <tr className="hover:bg-[#FAF8F5]">
-                            <td className="py-2.5 px-3 font-sans font-semibold text-[#1F2421]">
-                              Quantum Sensor Noise
-                            </td>
-                            <td className="py-2.5 px-3 text-[#5F6862]">
-                              {inputVal.toFixed(3)} <span className="font-sans text-[11px]">({degradation.noise}%)</span>
-                            </td>
-                            <td className="py-2.5 px-3 font-bold text-[#1F2421]">
-                              {detectedVal.toFixed(3)} <span className="font-sans text-[11px]">({(detectedVal * 100).toFixed(1)}%)</span>
-                            </td>
-                            <td className={`py-2.5 px-3 font-semibold ${absErr < 0.1 ? 'text-[#38563E]' : 'text-[#D9822B]'}`}>
-                              {err >= 0 ? `+${err.toFixed(3)}` : err.toFixed(3)}
-                            </td>
-                            <td className="py-2.5 px-3 text-[#38563E] font-bold font-sans">
-                              {acc}%
-                            </td>
-                          </tr>
-                        );
-                      })()}
-
-                      {/* Blur */}
-                      {(() => {
-                        const inputVal = degradation.blur / 8.0;
-                        const detectedVal = prediction.diagnosed_vector.blur;
-                        const err = detectedVal - inputVal;
-                        const absErr = Math.abs(err);
-                        const acc = Math.max(0, 100 - absErr * 100).toFixed(1);
-                        return (
-                          <tr className="hover:bg-[#FAF8F5]">
-                            <td className="py-2.5 px-3 font-sans font-semibold text-[#1F2421]">
-                              Respiratory Motion Blur
-                            </td>
-                            <td className="py-2.5 px-3 text-[#5F6862]">
-                              {inputVal.toFixed(3)} <span className="font-sans text-[11px]">({degradation.blur}px / 8px)</span>
-                            </td>
-                            <td className="py-2.5 px-3 font-bold text-[#1F2421]">
-                              {detectedVal.toFixed(3)} <span className="font-sans text-[11px]">({(detectedVal * 8.0).toFixed(1)}px eq)</span>
-                            </td>
-                            <td className={`py-2.5 px-3 font-semibold ${absErr < 0.1 ? 'text-[#38563E]' : 'text-[#D9822B]'}`}>
-                              {err >= 0 ? `+${err.toFixed(3)}` : err.toFixed(3)}
-                            </td>
-                            <td className="py-2.5 px-3 text-[#38563E] font-bold font-sans">
-                              {acc}%
-                            </td>
-                          </tr>
-                        );
-                      })()}
-
-                      {/* Contrast */}
-                      {(() => {
-                        const inputVal = Math.abs(degradation.contrast) / 50.0;
-                        const detectedVal = prediction.diagnosed_vector.contrast;
-                        const err = detectedVal - inputVal;
-                        const absErr = Math.abs(err);
-                        const acc = Math.max(0, 100 - absErr * 100).toFixed(1);
-                        return (
-                          <tr className="hover:bg-[#FAF8F5]">
-                            <td className="py-2.5 px-3 font-sans font-semibold text-[#1F2421]">
-                              Contrast Deviation
-                            </td>
-                            <td className="py-2.5 px-3 text-[#5F6862]">
-                              {inputVal.toFixed(3)} <span className="font-sans text-[11px]">({degradation.contrast}%)</span>
-                            </td>
-                            <td className="py-2.5 px-3 font-bold text-[#1F2421]">
-                              {detectedVal.toFixed(3)} <span className="font-sans text-[11px]">({(detectedVal * 100).toFixed(1)}%)</span>
-                            </td>
-                            <td className={`py-2.5 px-3 font-semibold ${absErr < 0.1 ? 'text-[#38563E]' : 'text-[#D9822B]'}`}>
-                              {err >= 0 ? `+${err.toFixed(3)}` : err.toFixed(3)}
-                            </td>
-                            <td className="py-2.5 px-3 text-[#38563E] font-bold font-sans">
-                              {acc}%
-                            </td>
-                          </tr>
-                        );
-                      })()}
-
-                      {/* Compression */}
-                      {(() => {
-                        const inputVal = degradation.compression / 100;
-                        const detectedVal = prediction.diagnosed_vector.compression;
-                        const err = detectedVal - inputVal;
-                        const absErr = Math.abs(err);
-                        const acc = Math.max(0, 100 - absErr * 100).toFixed(1);
-                        return (
-                          <tr className="hover:bg-[#FAF8F5]">
-                            <td className="py-2.5 px-3 font-sans font-semibold text-[#1F2421]">
-                              PACS JPEG Compression
-                            </td>
-                            <td className="py-2.5 px-3 text-[#5F6862]">
-                              {inputVal.toFixed(3)} <span className="font-sans text-[11px]">({degradation.compression}%)</span>
-                            </td>
-                            <td className="py-2.5 px-3 font-bold text-[#1F2421]">
-                              {detectedVal.toFixed(3)} <span className="font-sans text-[11px]">({(detectedVal * 100).toFixed(1)}%)</span>
-                            </td>
-                            <td className={`py-2.5 px-3 font-semibold ${absErr < 0.1 ? 'text-[#38563E]' : 'text-[#D9822B]'}`}>
-                              {err >= 0 ? `+${err.toFixed(3)}` : err.toFixed(3)}
-                            </td>
-                            <td className="py-2.5 px-3 text-[#38563E] font-bold font-sans">
-                              {acc}%
-                            </td>
-                          </tr>
-                        );
-                      })()}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Model 3: Radiologist Consensus & Clinical Triage Panel */}
-              <div className="p-6 rounded-3xl bg-white border border-[#EBE5D8] shadow-soft space-y-5">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-[#1F2421] uppercase tracking-wider">
-                    Model 3: Clinical Diagnostic Consensus Panel
-                  </h4>
-                  <div className="flex items-center gap-1.5 text-xs text-[#5F6862]">
-                    <Cpu className="w-3.5 h-3.5" />
-                    <span>{prediction.device_used.toUpperCase()}</span>
-                  </div>
-                </div>
-
-                {/* 3-Tier Clinical Triage Badge */}
-                <div
-                  className={`p-4 rounded-2xl border flex items-start gap-3 ${
-                    prediction.pneumonia_percent >= 75
-                      ? 'bg-[#FAF4F2] border-[#E8CFC7] text-[#944432]'
-                      : prediction.pneumonia_percent >= 45
-                      ? 'bg-[#FDF9F0] border-[#EBDCB8] text-[#8C6D1F]'
-                      : 'bg-[#F4F7F4] border-[#C9D7C8] text-[#38563E]'
-                  }`}
-                >
-                  {prediction.pneumonia_percent >= 75 ? (
-                    <AlertOctagon className="w-5 h-5 shrink-0 mt-0.5 text-[#C8644E]" />
-                  ) : prediction.pneumonia_percent >= 45 ? (
-                    <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-[#D9822B]" />
-                  ) : (
-                    <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5 text-[#4F7757]" />
-                  )}
-
-                  <div className="space-y-1">
-                    <p className="text-sm font-bold tracking-tight">
-                      {prediction.clinical_risk}
-                    </p>
-                    <p className="text-xs leading-relaxed opacity-90">
-                      {prediction.recommendation}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Consensus Probability Distribution Bar */}
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="font-semibold text-[#1F2421]">
-                      Consensus Confidence: Pneumonia ({prediction.pneumonia_percent}%) vs Normal ({prediction.normal_percent}%)
-                    </span>
-                    <span className="text-[11px] text-[#5F6862]">
-                      (Corrupted was: {prediction.corrupted_pneumonia_percent}%)
-                    </span>
+              {/* Right Result Card: Model 3 Radiologist Consensus & Clinical Triage Panel */}
+              <div className="p-6 rounded-3xl bg-white border border-[#EBE5D8] shadow-soft space-y-5 flex flex-col justify-between">
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-[#1F2421] uppercase tracking-wider">
+                      Model 3: Clinical Diagnostic Consensus Panel
+                    </h4>
+                    <div className="flex items-center gap-1.5 text-xs text-[#5F6862]">
+                      <Cpu className="w-3.5 h-3.5" />
+                      <span>{prediction.device_used.toUpperCase()}</span>
+                    </div>
                   </div>
 
-                  <div className="w-full h-3.5 bg-[#EBE5D8] rounded-full overflow-hidden flex shadow-inner">
-                    <div
-                      className="h-full bg-[#4F7757] transition-all duration-500"
-                      style={{ width: `${prediction.normal_percent}%` }}
-                      title={`Normal: ${prediction.normal_percent}%`}
-                    />
-                    <div
-                      className="h-full bg-[#C8644E] transition-all duration-500"
-                      style={{ width: `${prediction.pneumonia_percent}%` }}
-                      title={`Pneumonia: ${prediction.pneumonia_percent}%`}
-                    />
+                  {/* 3-Tier Clinical Triage Badge */}
+                  <div
+                    className={`p-4 rounded-2xl border flex items-start gap-3 ${
+                      prediction.pneumonia_percent >= 75
+                        ? 'bg-[#FAF4F2] border-[#E8CFC7] text-[#944432]'
+                        : prediction.pneumonia_percent >= 45
+                        ? 'bg-[#FDF9F0] border-[#EBDCB8] text-[#8C6D1F]'
+                        : 'bg-[#F4F7F4] border-[#C9D7C8] text-[#38563E]'
+                    }`}
+                  >
+                    {prediction.pneumonia_percent >= 75 ? (
+                      <AlertOctagon className="w-5 h-5 shrink-0 mt-0.5 text-[#C8644E]" />
+                    ) : prediction.pneumonia_percent >= 45 ? (
+                      <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-[#D9822B]" />
+                    ) : (
+                      <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5 text-[#4F7757]" />
+                    )}
+
+                    <div className="space-y-1">
+                      <p className="text-sm font-bold tracking-tight">
+                        {prediction.clinical_risk}
+                      </p>
+                      <p className="text-xs leading-relaxed opacity-90">
+                        {prediction.recommendation}
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex justify-between text-[11px] text-[#5F6862]">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#4F7757]" /> Normal
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#C8644E]" /> Pneumonia
-                    </span>
+
+                  {/* Consensus Probability Distribution Bar */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="font-semibold text-[#1F2421]">
+                        Consensus Confidence: Pneumonia ({prediction.pneumonia_percent}%) vs Normal ({prediction.normal_percent}%)
+                      </span>
+                      <span className="text-[11px] text-[#5F6862]">
+                        (Corrupted was: {prediction.corrupted_pneumonia_percent}%)
+                      </span>
+                    </div>
+
+                    <div className="w-full h-3.5 bg-[#EBE5D8] rounded-full overflow-hidden flex shadow-inner">
+                      <div
+                        className="h-full bg-[#4F7757] transition-all duration-500"
+                        style={{ width: `${prediction.normal_percent}%` }}
+                        title={`Normal: ${prediction.normal_percent}%`}
+                      />
+                      <div
+                        className="h-full bg-[#C8644E] transition-all duration-500"
+                        style={{ width: `${prediction.pneumonia_percent}%` }}
+                        title={`Pneumonia: ${prediction.pneumonia_percent}%`}
+                      />
+                    </div>
+                    <div className="flex justify-between text-[11px] text-[#5F6862]">
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#4F7757]" /> Normal
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#C8644E]" /> Pneumonia
+                      </span>
+                    </div>
                   </div>
                 </div>
 
                 {/* Individual Radiologist Breakdown */}
-                <div className="pt-2 border-t border-[#EBE5D8] space-y-2">
+                <div className="pt-3 border-t border-[#EBE5D8] space-y-2">
                   <p className="text-xs font-semibold text-[#1F2421]">
                     Individual Model Opinion Breakdown (3-Radiologist Consensus)
                   </p>
@@ -825,9 +894,29 @@ export const StudioPage: React.FC = () => {
                 </div>
               </div>
             </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="h-64 rounded-3xl bg-white border border-[#EBE5D8] shadow-soft p-6 animate-pulse flex flex-col justify-between">
+                <div className="h-4 w-48 bg-[#EBE5D8] rounded-lg" />
+                <div className="space-y-3">
+                  <div className="h-8 bg-[#F5F2EB] rounded-xl" />
+                  <div className="h-8 bg-[#F5F2EB] rounded-xl" />
+                  <div className="h-8 bg-[#F5F2EB] rounded-xl" />
+                </div>
+              </div>
+              <div className="h-64 rounded-3xl bg-white border border-[#EBE5D8] shadow-soft p-6 animate-pulse flex flex-col justify-between">
+                <div className="h-4 w-56 bg-[#EBE5D8] rounded-lg" />
+                <div className="h-16 bg-[#F5F2EB] rounded-2xl" />
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="h-16 bg-[#F5F2EB] rounded-2xl" />
+                  <div className="h-16 bg-[#F5F2EB] rounded-2xl" />
+                  <div className="h-16 bg-[#F5F2EB] rounded-2xl" />
+                </div>
+              </div>
+            </div>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 };
