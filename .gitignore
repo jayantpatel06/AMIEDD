@@ -69,8 +69,11 @@ frontend/dist/
 frontend/dist-ssr/
 frontend/*.local
 
-# Model weights & Checkpoints (large binary files)
+# Model weights & Checkpoints (large binary files; 5 inference checkpoints tracked via Git LFS)
 *.pth
+!checkpoints/detector/best_detector.pth
+!checkpoints/enhancer/best_enhancer.pth
+!checkpoints/disease_models/*.pth
 *.pt
 *.onnx
 *.bin

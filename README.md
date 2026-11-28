@@ -15,9 +15,10 @@
 5. [Calibrated Consensus & Clinical Triage](#5-calibrated-consensus--clinical-triage)
 6. [Verified 624-Scan Benchmark Results](#6-verified-624-scan-benchmark-results)
 7. [Web Application (FastAPI + React Studio)](#7-web-application-fastapi--react-studio)
-8. [Installation & Quickstart](#8-installation--quickstart)
-9. [Project Structure](#9-project-structure)
-10. [Testing & Verification](#10-testing--verification)
+8. [Installation & Quickstart (Clone & Test)](#8-installation--quickstart-clone--test)
+9. [Publishing to GitHub (Maintainer Checklist)](#9-publishing-to-github-maintainer-checklist)
+10. [Project Structure](#10-project-structure)
+11. [Testing & Verification](#11-testing--verification)
 
 ---
 
@@ -184,10 +185,17 @@ Evaluated on all **624 unique Kaggle `test/` scans** (`234` Normal, `390` Pneumo
 
 ---
 
-## 8. Installation & Quickstart
+## 8. Installation & Quickstart (Clone & Test)
 
-### 1. Python Environment
+Anyone cloning this repository can test the full web application and unit tests **without downloading the 5,856-image Kaggle dataset**—3 clinical CXR samples are already bundled in [`frontend/public/samples/`](frontend/public/samples/), and `pytest` uses built-in procedural phantoms.
+
+### 1. Clone & Set Up Python Environment (`Python >= 3.10`)
+Make sure [Git LFS](https://git-lfs.com/) is installed so the pretrained model weights in `checkpoints/` are downloaded automatically during clone:
 ```bash
+git lfs install
+git clone https://github.com/jayantpatel06/AMIEDD.git
+cd AMIEDD
+
 python -m venv venv
 # Windows:
 venv\Scripts\activate
@@ -197,14 +205,25 @@ source venv/bin/activate
 pip install -e .
 ```
 
-### 2. Dataset Setup
-Place the Kaggle Chest X-Ray (Pneumonia) dataset at `data/chest_xray/` (`train/`, `val/`, `test/` with `NORMAL/` and `PNEUMONIA/`), or configure `~/.kaggle/kaggle.json` and run:
-```bash
-python -c "from src.data.download_kaggle import setup_kaggle_dataset; setup_kaggle_dataset('data/chest_xray')"
+### 2. Verify Pretrained Checkpoints (Tracked via Git LFS)
+Cloning with Git LFS downloads the 5 inference checkpoints automatically under `checkpoints/`:
+```text
+checkpoints/
+├── detector/best_detector.pth
+├── enhancer/best_enhancer.pth
+└── disease_models/
+    ├── efficientnet_b0.pth
+    ├── densenet121.pth
+    └── resnet50.pth
 ```
-*(If no Kaggle key is present, [`download_kaggle.py`](src/data/download_kaggle.py) generates procedural CXR phantoms for testing.)*
+If you cloned before installing Git LFS (and see tiny ~130-byte pointer files), fetch the weights with:
+```bash
+git lfs install
+git lfs pull
+```
+> **Note:** Without these 5 trained checkpoints, `server.py` falls back to uninitialized weights for Model 1 & Model 2 and ImageNet weights for Model 3—so predictions will not reflect the trained AMIEDD system unless you pull the LFS checkpoints or train from scratch (Step 5).
 
-### 3. Build Frontend & Start Web App
+### 3. Build Frontend & Launch the Web App (`Node.js >= 20.19` or `>= 22.12`)
 ```bash
 cd frontend
 npm install
@@ -213,9 +232,18 @@ cd ..
 
 python server.py
 ```
-Open **http://localhost:8000** in your browser. *(For frontend hot-reload dev mode, run `npm run dev` in `frontend/`; `vite.config.ts` proxies `/api` to `localhost:8000`.)*
+Open **http://localhost:8000** in your browser, go to **Testing Studio**, pick one of the 3 bundled CXR scans (or upload any X-ray), adjust degradation sliders, and click **Send to AI Pipeline**.
 
-### 4. Training, Fine-Tuning & Evaluation Scripts
+*(For frontend hot-reload dev mode, run `npm run dev` in `frontend/`; `vite.config.ts` proxies `/api` to `localhost:8000`.)*
+
+### 4. Dataset Setup *(Only Needed for Training or Full 624-Scan Evaluation)*
+Place the Kaggle Chest X-Ray (Pneumonia) dataset at `data/chest_xray/` (`train/`, `val/`, `test/` with `NORMAL/` and `PNEUMONIA/`), or configure `~/.kaggle/kaggle.json` and run:
+```bash
+python -c "from src.data.download_kaggle import setup_kaggle_dataset; setup_kaggle_dataset('data/chest_xray')"
+```
+*(If no Kaggle key is present, [`download_kaggle.py`](src/data/download_kaggle.py) generates procedural CXR phantoms for testing.)*
+
+### 5. Training, Fine-Tuning & Evaluation Scripts
 ```bash
 # Full pipeline (Model 1 -> Model 2 -> Step 3 eval)
 python scripts/run_full_pipeline.py --mode all
@@ -232,7 +260,37 @@ python scripts/demo_single_image.py --noise 0.6 --blur 0.5 --contrast 0.3 --comp
 
 ---
 
-## 9. Project Structure
+## 9. Publishing to GitHub (Maintainer Checklist)
+
+### What Gets Pushed via Git
+Standard tracked source files (~a few MB total; `.gitignore` excludes `data/chest_xray`, `frontend/node_modules/`, `frontend/dist/`, and `last_*.pth`):
+- `server.py`, `pyproject.toml`, `README.md`, `.gitignore`, `.gitattributes`
+- `configs/default_config.yaml` and **`configs/calibration.json`** *(essential for calibrated consensus triage)*
+- `src/`, `scripts/`, `tests/`
+- `frontend/` source code + `frontend/public/samples/` *(3 bundled test X-rays)*
+- `outputs/` *(pre-generated benchmark report and comparison figures; use `git add -f outputs/` if committing regenerated files since `outputs/` is gitignored)*
+
+### Model Weights via Git LFS (`*.pth`)
+`.gitattributes` tracks `*.pth` via **Git LFS**, and `.gitignore` allows the 5 inference checkpoints (`best_detector.pth`, `best_enhancer.pth`, `disease_models/*.pth`) while keeping `last_*.pth` ignored:
+```bash
+git add .gitattributes .gitignore README.md
+git add checkpoints/detector/best_detector.pth checkpoints/enhancer/best_enhancer.pth checkpoints/disease_models/*.pth
+git lfs status   # verify all 5 .pth files are marked as LFS
+git commit -m "chore: track inference checkpoints with Git LFS and update README"
+git push origin main
+```
+*(Optional — to reduce Git LFS storage/bandwidth from ~351 MiB to ~196 MiB before committing, strip `optimizer_state_dict` from the detector and enhancer checkpoints; `server.py` loads pure `model_state_dict` directly:)*
+```python
+import torch
+for p in ["checkpoints/detector/best_detector.pth", "checkpoints/enhancer/best_enhancer.pth"]:
+    ckpt = torch.load(p, map_location="cpu")
+    if "model_state_dict" in ckpt:
+        torch.save({"model_state_dict": ckpt["model_state_dict"]}, p)
+```
+
+---
+
+## 10. Project Structure
 
 ```
 AMIEDD/
@@ -285,11 +343,14 @@ AMIEDD/
 
 ---
 
-## 10. Testing & Verification
+## 11. Testing & Verification
 
 ```bash
-# Run Python unit & end-to-end tests (15/15 passing)
-pytest tests/ -v
+# Run Python unit & end-to-end tests (15/15 passing; uses built-in procedural phantoms)
+python -m pytest tests/ -v
+
+# Check backend health once `python server.py` is running
+curl http://localhost:8000/api/health
 
 # Build and lint the frontend
 cd frontend
